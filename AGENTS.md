@@ -116,6 +116,11 @@
     复用;任何解析异常降级为「不可用」,绝不 reject boot。**不要**把这些行写成无条件——包缺失会拒绝
     整棵挂载(见不变量 2);也**不要**为此抬 `engines.dsh`。官方下一版若再加行,先重跑 fixture 生成器
     再决定是否新增探测位。
+    **v0.21.3 追加合取项**:「包可解析」不等于「宿主没有该行」——profile 的其他 bundle 能往全局层插
+    同名行(`dsh-experimental-schedule-bundle` 插 `time-context`),preset 再挂一份就是两个实例同时监听
+    `agent/pre-step`、同时读未落盘的投影状态 ⇒ 每轮重复注入。`hostedRowIds(ctx)` 读活 loader registry
+    里已启用的行 id(与 `detectOpsPresence` 同读法;**必须 await**——`ctx.inject` 是 fiber,同步读法恒
+    空集,即 v0.21.2 修掉的那类回归),三个探测位各自加上「宿主未提供该行」。boot 路径读一次共享给探测。
 
 ## 验证清单(改动后)
 
