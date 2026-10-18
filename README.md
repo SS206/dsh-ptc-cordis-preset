@@ -83,7 +83,7 @@ dsh plugin --profile web add dsh-ptc-cordis-preset
 ```bash
 git clone https://github.com/KannaKuron/dsh-ptc-cordis-preset.git
 cd dsh-ptc-cordis-preset
-npm test   # node --test,52 项冒烟测试(无网络、无构建;数量以 npm test 输出为准)
+npm test   # node --test,55 项冒烟测试(无网络、无构建;数量以 npm test 输出为准)
 ```
 
 本插件无构建步骤:`src/index.js` 与 `src/composition.js` 即发布产物。

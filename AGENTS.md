@@ -37,7 +37,7 @@
 | `dsh.plugin.json` | 插件注册表清单(id `dsh-external/dsh-ptc-cordis-preset`;`engines.dsh` = `>=0.1.7-rc`,与 package.json peer 对齐) |
 | `cordis.patch.yml` | `dsh.bundle.patch` 层:①插件行 insert(id `ptc-cordis`);②实验性 Python 运行时块(v0.15.0,默认关——四个共享 `!!js` 合取锚点,见文件内长注释) |
 | `tests/fixtures/official-preset-rows.json` + `official-preset-rows.0.2.1.json` | 官方内置 preset 行序列快照(0.1.7 与 0.2.1 双捕获),`tools/gen-official-preset-fixture.mjs` 生成,smoke 用两份双向锁组合对齐(本机 Windows 生成姿势见 CHANGELOG v0.17.0) |
-| `tests/smoke.mjs` | 冒烟测试(52 项;helper 级 + 一个 apply() 真 boot 路径测试) |
+| `tests/smoke.mjs` | 冒烟测试(55 项;helper 级 + 一个 apply() 真 boot 路径测试) |
 
 ## 核心不变量(改代码前必读)
 
@@ -124,7 +124,7 @@
 
 ## 验证清单(改动后)
 
-1. `npm test` 全绿(53 项,含 apply() 真 boot 路径测试与翻转顺序断言)。
+1. `npm test` 全绿(55 项,含 apply() 真 boot 路径测试与翻转顺序断言)。
 2. 真机(隔离 `DSH_HOME` + web profile + `@deepseek-ai/dsh-web-app` bundle):启动 →
    `[ptc-cordis] preset 'ptc-cordis' registered declaratively (workflow tool permanently off, matching the official ptc preset …)`
    → 模式选择器出现「PTC 创造模式」→ 插件详情页设置卡渲染(pythonRuntime / Git Bash 去重两行)。
