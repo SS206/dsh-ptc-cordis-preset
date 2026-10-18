@@ -251,7 +251,29 @@ export function pluginsFor({ gitBashActive, inlinePatched = false, skillsDir, ho
     {
       id: 'skill-filesystem',
       name: '@deepseek-ai/dsh-skill-filesystem',
-      ...(skillsDir ? { config: { customSkillDirs: [skillsDir] } } : {}),
+      // v0.21.3: the row always disables its watcher.
+      //
+      // WHY: `dsh-tool-skill` publishes the session skill catalog only while
+      // `ctx.skills.snapshot().complete === true`, and the filesystem provider
+      // reports `complete: false` whenever ANY of its watched roots fails to
+      // open a watcher (dsh-skill-filesystem lib list(): the try/catch around
+      // `watchManager.observeRoots`). A `customSkillDirs` entry that resolves
+      // inside the host's `app.asar` — the bundled
+      // `@deepseek-ai/dsh-agent-preset/skills` on a packaged desktop build —
+      // can never be watched, so the whole provider stays incomplete and the
+      // catalog is never emitted. The official `cordis` preset carries the
+      // same `customSkillDirs` row and shows the same symptom, while
+      // `standard`/`ptc` (no `customSkillDirs`) publish the catalog normally;
+      // that asymmetry is the observable signature (2026-10-18, dsh
+      // 0.2.0-rc.2 desktop).
+      //
+      // The preset's own skills are static deployment content, so giving up
+      // change notifications costs nothing here; preset sessions are not where
+      // skills get authored.
+      config: {
+        watch: false,
+        ...(skillsDir ? { customSkillDirs: [skillsDir] } : {}),
+      },
     },
     { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
     { id: 'present', name: '@deepseek-ai/dsh-tool-present' },

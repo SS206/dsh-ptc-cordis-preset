@@ -5,6 +5,15 @@
 
 > ⚠️ **请勿安装 v0.15.2** —— 该版本有致命回归(`runtimeConfig` 作用域错误),插件整条注册失败。请用 **v0.15.3** 或更早的 v0.15.1。
 
+## v0.21.3 — 2026-10-19
+
+### fix:宿主已挂载的增量行不再重复挂载;skill-filesystem 关闭 watcher(会话技能目录整场缺失的候选根因)
+
+- **fix(重复挂载,v0.17.0 探测面的补丁)**:`probeHostExtras` 原先只判断「包能否从 `ctx.baseUrl` 解析」,但**包可解析 ≠ 宿主没有该行**——profile 的 bundle 可以往全局层插同名行(`@deepseek-ai/dsh-experimental-schedule-bundle` 的 `cordis.patch.yml` 第 8–10 行就插了 `time-context`)。于是 preset 又挂一份,同一 step 两个实例都监听 `agent/pre-step`、都在提交前读同一份未落盘的投影状态,于是**每轮注入两条**时间上下文(内置 standard/ptc/cordis 会话恒为一条;2026-10-18 dsh 0.2.0-rc.2 desktop 实测:ptc-cordis 会话 `src=time-context` 成对出现,其余预设单条)。新增 `hostedRowIds(ctx)`:读活 loader registry 里**已启用**的行 id(与 `detectOpsPresence` 同一读法、同一 fiber 语义——**必须 await**,同步读法正是 v0.21.2 修掉的那类回归),`time-context` / `tool-schedule` / `tool-plugin-market` 三个探测位都加上「宿主未提供该行」这一合取项。boot 路径读一次并共享给探测,保证组合与启动日志描述同一份注册表状态。
+- **fix(skill-filesystem watcher)**:组合行现在恒带 `config.watch = false`。`dsh-tool-skill` 只在 `ctx.skills.snapshot().complete === true` 时发布会话技能目录,而 filesystem provider 只要有**任一** root 开不出 watcher 就报 `complete: false`(`dsh-skill-filesystem` 的 `list()` 里 `observeRoots` 的 try/catch);落在打包宿主 `app.asar` 里的 `customSkillDirs`(即 `@deepseek-ai/dsh-agent-preset/skills`)永远无法被 watch。本机相关性证据:带 `customSkillDirs` 的官方 `cordis` preset 与本插件 `ptc-cordis` 会话**整场没有** `src=skill-catalog`,而不带的 `standard` / `ptc` 会话首轮即有(ptc-cordis 4/4 会话零命中,对照会话命中)。preset 自带技能是静态部署内容,放弃变更通知无实际代价。
+- **验证**:`npm test` **55 项全绿**;新增用例 `v0.21.3: a row the host already mounts is not added a second time`(异步 fiber mock:启用行抑制、**禁用的宿主行不抑制**、无 loader 降级回包探测、预读集合可直接传入),并按新形态更新 `skill-filesystem` 的两处既有断言(现在恒有 config,`customSkillDirs` 仍只在解析成功时出现)。
+- **待确认(如实记录)**:watcher 一项目前是「可观测相关性 + 源码链路」推断,尚未取到运行时 filesystem provider 的 `complete` 取值;真机(打包 desktop 宿主)确认后再定去留。若不成立,回退该行 config 即可,不影响上面那条修复。
+
 ## v0.21.2 — 2026-10-19
 
 ### fix:detectOpsPresence 异步化;route B 补位断裂修复(gitbash v0.39.0+ 全面失效的根因)

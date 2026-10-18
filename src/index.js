@@ -609,6 +609,47 @@ function cleanupLegacyTree() {
 }
 
 /**
+ * Ids of the rows the HOST composition already mounts and enables.
+ *
+ * "The package resolves" is NOT the same thing as "the host does not already
+ * carry this row". A profile bundle can insert the very same id into the
+ * global layer — `@deepseek-ai/dsh-experimental-schedule-bundle` inserts
+ * `time-context` (its cordis.patch.yml, lines 8-10) — and a preset that
+ * re-declares it then runs TWO instances of the same plugin. Both listen on
+ * `agent/pre-step` and both read the session projection state before either
+ * injection is committed, so every refresh window injects the same message
+ * twice (symptom: two `src=time-context` user messages per turn in a
+ * `ptc-cordis` session, exactly one in every built-in preset session;
+ * 2026-10-18, dsh 0.2.0-rc.2 desktop).
+ *
+ * Reading the live loader registry is the only way to see that, and it is the
+ * same read `detectOpsPresence()` performs for dsh-ops — including its fiber
+ * semantics: `ctx.inject` starts a FIBER, so the callback runs once the
+ * `loader` dependency is ready, which is after a synchronous body would have
+ * returned (the v0.21.2 regression class). The probe MUST therefore be
+ * awaited; a synchronous body always answers with an empty set.
+ * @param {object} ctx - cordis context (any fiber of the running host).
+ * @returns {Promise<Set<string>>} enabled row ids; empty when the loader is
+ *   unreadable (an older/unserviceable host degrades to the package probe).
+ */
+export async function hostedRowIds(ctx) {
+  const ids = new Set()
+  try {
+    await ctx.inject(['loader'], (loaderCtx) => {
+      for (const entry of loaderCtx.get('loader')?.entries?.() ?? []) {
+        const options = entry?.options
+        if (typeof options?.id !== 'string' || options.id === '') continue
+        if (options.disabled === true) continue
+        ids.add(options.id)
+      }
+    })
+  } catch {
+    /* no loader service — callers fall back to the package probe */
+  }
+  return ids
+}
+
+/**
  * Probe the dsh 0.2.1 preset deltas for the composition: alpha.1 added a
  * `time-context` row (durable clock readings) and a `tool-schedule` row (the
  * reminder tools) to every full-tool official preset, alpha.3 REMOVED the
@@ -621,12 +662,22 @@ function cleanupLegacyTree() {
  * with the mounter. On dsh <= 0.2.0 all stay false and the row set is
  * byte-identical to the 0.1.7 capture. Probed once per boot; the profile's
  * package set does not change under a running host.
+ *
+ * v0.21.3: a resolvable package is no longer sufficient. Each row id is also
+ * checked against {@link hostedRowIds}, because a profile bundle can already
+ * provide the same row globally while the package still resolves from
+ * `ctx.baseUrl` all the same. The preset must mirror what the built-in
+ * presets see — one instance, supplied by the host — instead of adding a
+ * second one.
  * @param {object} ctx - cordis context (any fiber of the running host).
  * @param {Function} [resolve] - predicate override for tests; receives a
  *   package specifier, resolves like `require.resolve`, returns boolean.
+ * @param {Set<string>} [hosted] - host row ids; read through
+ *   {@link hostedRowIds} when omitted (callers that already read the registry
+ *   pass theirs, tests inject a fixture).
  * @returns {Promise<{timeContext: boolean, toolSchedule: boolean, pluginMarket: boolean}>}
  */
-export async function probeHostExtras(ctx, resolve) {
+export async function probeHostExtras(ctx, resolve, hosted) {
   let ok = resolve
   if (ok === undefined) {
     try {
@@ -639,12 +690,17 @@ export async function probeHostExtras(ctx, resolve) {
       ok = () => false
     }
   }
+  const hostRows = hosted ?? await hostedRowIds(ctx)
   const [timeContext, toolSchedule, pluginMarket] = await Promise.all([
     Promise.resolve(safe(ok, '@deepseek-ai/dsh-time-context')).then(Boolean),
     Promise.resolve(safe(ok, '@deepseek-ai/dsh-tool-schedule')).then(Boolean),
     Promise.resolve(safe(ok, '@deepseek-ai/dsh-plugin-market/tools')).then(Boolean),
   ])
-  return { timeContext, toolSchedule, pluginMarket }
+  return {
+    timeContext: timeContext && !hostRows.has('time-context'),
+    toolSchedule: toolSchedule && !hostRows.has('tool-schedule'),
+    pluginMarket: pluginMarket && !hostRows.has('tool-plugin-market'),
+  }
 }
 
 /** Run one probe predicate; ANY failure reads as "absent" (a throwing
@@ -702,7 +758,11 @@ async function runDeclarativeEra(ctx, config, coverage) {
   const gitBashActive = peerGitBash?.active === true
   const peerPwshTool = peerGitBash?.pwshToolEnabled === true
   const skillsDir = await resolveSkillsDir()
-  const hostExtras = await probeHostExtras(ctx)
+  // v0.21.3: the host row ids are read once and shared with the probe, so the
+  // rows added to the composition and the boot log always describe the same
+  // live registry state.
+  const hosted = await hostedRowIds(ctx)
+  const hostExtras = await probeHostExtras(ctx, undefined, hosted)
   // Boot-once probe (same lifecycle as hostExtras): the bundle patch rows are
   // in the loader by plugin-mount time, and a plugin install/uninstall
   // restarts the host anyway, so there is no live path that would stale it.
@@ -838,4 +898,4 @@ export async function apply(ctx, config) {
 }
 
 // Test surface: pure helpers, no Cordis context required.
-export const _internal = { PRESET_ID, COVERAGE_CAPABILITY, MARKER_FILE, DEFAULT_PYTHON_RUNTIME, PYTHON_RUNTIME_PACKAGE, RUNTIME_SNAPSHOT_FILE, classify, hashTree, installRegisterShim, valueOf, pythonRuntimeOf, runtimeSnapshotPath, readRuntimeSnapshot, writeRuntimeSnapshot, probePythonRuntime, syncRuntimeSnapshot, detectGitBash, publishPresetCoverage, probeHostExtras }
+export const _internal = { PRESET_ID, COVERAGE_CAPABILITY, MARKER_FILE, DEFAULT_PYTHON_RUNTIME, PYTHON_RUNTIME_PACKAGE, RUNTIME_SNAPSHOT_FILE, classify, hashTree, installRegisterShim, valueOf, pythonRuntimeOf, runtimeSnapshotPath, readRuntimeSnapshot, writeRuntimeSnapshot, probePythonRuntime, syncRuntimeSnapshot, detectGitBash, publishPresetCoverage, hostedRowIds, probeHostExtras }

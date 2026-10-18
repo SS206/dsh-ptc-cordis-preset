@@ -270,6 +270,9 @@ test('composition module: rows stay on the creation side and split by gitbash ca
     assert.equal(row(rows, 'tool-cordis').name, '@deepseek-ai/dsh-tool-cordis')
     assert.equal(row(rows, 'present').name, '@deepseek-ai/dsh-tool-present')
     assert.equal(row(rows, 'skill-filesystem').config.customSkillDirs[0], '/x/skills')
+    // v0.21.3: the watcher is off on every emission (see the plain-rows case
+    // below for why), the skills dir contribution still rides along
+    assert.equal(row(rows, 'skill-filesystem').config.watch, false)
     // v0.21.0: the workflow knob retired — both engine rows are PERMANENTLY
     // disabled, byte-for-byte the official 'ptc' patch's shape (PTC itself is
     // the workflow engine; the rows stay so re-alignment diffs stay row-for-row)
@@ -296,10 +299,15 @@ test('composition module: rows stay on the creation side and split by gitbash ca
   // fixture-backed alignment tests below hold that against the real capture.
   assert.equal(row(plain, 'tool-bash').disabled === true, win)
   assert.equal(row(plain, 'tool-pwsh').disabled === true, !win)
-  // without a resolved skills dir the row carries NO config key at all —
-  // the official 0.1.7 standard/ptc shape (an empty array would be a lie:
-  // the row would advertise a root list nothing resolved)
-  assert.equal(row(plain, 'skill-filesystem').config, undefined)
+  // v0.21.3: the row ALWAYS carries a config now — the watcher is switched off
+  // unconditionally. A `customSkillDirs` root inside a packaged host's app.asar
+  // can never be watched, and ONE unwatchable root leaves the whole filesystem
+  // provider incomplete, which in turn suppresses the session skill catalog
+  // entirely (dsh-tool-skill publishes only while `snapshot().complete`). With
+  // no resolved skills dir the only key is `watch`; an empty customSkillDirs
+  // array would still be a lie (the row would advertise a root list nothing
+  // resolved), which is why the key stays absent in that case.
+  assert.deepEqual(row(plain, 'skill-filesystem').config, { watch: false })
   const gb = pluginsFor({ gitBashActive: true, skillsDir: undefined })
   // gitbash cooperation (an active Git Bash stack, which dsh-gitbash-shell
   // reports on Windows only): bash on, pwsh replaced —
@@ -705,6 +713,42 @@ test('v0.19.0: probeHostExtras resolves from the host base and degrades to false
   assert.deepEqual(await probeHostExtras(undefined, (spec) => { if (spec === '@deepseek-ai/dsh-tool-schedule') throw new Error('boom'); return false }), { timeContext: false, toolSchedule: false, pluginMarket: false })
   // default resolver path: no baseUrl, from this test file — official host packages absent → all false
   assert.deepEqual(await probeHostExtras({}), { timeContext: false, toolSchedule: false, pluginMarket: false })
+})
+
+test('v0.21.3: a row the host already mounts is not added a second time', async () => {
+  const { hostedRowIds, probeHostExtras } = await import('../src/index.js')
+  // Same mock semantics as detectOpsPresence's below: ctx.inject starts a
+  // FIBER whose callback runs only after the call returns. A synchronous read
+  // would always answer with an empty set on a real host (the v0.20.0
+  // regression class), so the await is part of the contract under test.
+  const ctxWith = (entries, injectThrows = false) => ({
+    inject: (names, fn) => {
+      if (injectThrows) throw new Error('loader missing')
+      const fiber = new Promise((resolve) => { setImmediate(() => { fn({ get: () => ({ entries: () => entries }) }); resolve() }) })
+      return { then: (onFulfilled, onRejected) => fiber.then(onFulfilled, onRejected) }
+    },
+  })
+  const row = (id, disabled) => ({ options: { id, disabled } })
+  // the live registry read: enabled ids only, malformed entries skipped
+  assert.deepEqual(
+    [...await hostedRowIds(ctxWith([row('time-context'), row('skill', true), { options: {} }, row('')]))],
+    ['time-context'],
+  )
+  // A row the host already carries loses to the host. The duplicate is not
+  // cosmetic: `@deepseek-ai/dsh-experimental-schedule-bundle` inserts
+  // `time-context` into the global layer, and two instances both listen on
+  // `agent/pre-step`, both read the uncommitted projection state, and so both
+  // inject the same reading — two `src=time-context` messages per turn in a
+  // ptc-cordis session against exactly one in every built-in preset session.
+  assert.deepEqual(await probeHostExtras(ctxWith([row('time-context')]), () => true), { timeContext: false, toolSchedule: true, pluginMarket: true })
+  assert.deepEqual(await probeHostExtras(ctxWith([row('tool-schedule')]), () => true), { timeContext: true, toolSchedule: false, pluginMarket: true })
+  assert.deepEqual(await probeHostExtras(ctxWith([row('tool-plugin-market')]), () => true), { timeContext: true, toolSchedule: true, pluginMarket: false })
+  // a user-DISABLED host row is not an instance: it must not suppress the delta
+  assert.deepEqual(await probeHostExtras(ctxWith([row('time-context', true)]), () => true), { timeContext: true, toolSchedule: true, pluginMarket: true })
+  // no loader at all → the package probe stands alone (older/unserviceable host)
+  assert.deepEqual(await probeHostExtras(ctxWith([], true), () => true), { timeContext: true, toolSchedule: true, pluginMarket: true })
+  // the boot path reads the registry once and shares it; a pre-read set is accepted
+  assert.deepEqual(await probeHostExtras(undefined, () => true, new Set(['time-context'])), { timeContext: false, toolSchedule: true, pluginMarket: true })
 })
 
 test('v0.21.2: detectOpsPresence awaits the loader fiber and degrades to false', async () => {
